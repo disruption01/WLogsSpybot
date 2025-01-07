@@ -1,4 +1,7 @@
-const { Client, GatewayIntentBits } = require('discord.js');
+const {
+    Client,
+    GatewayIntentBits
+} = require('discord.js');
 const axios = require('axios');
 require('dotenv').config();
 
@@ -20,8 +23,7 @@ async function getAccessToken() {
             'https://fresh.warcraftlogs.com/oauth/token',
             new URLSearchParams({
                 grant_type: 'client_credentials',
-            }),
-            {
+            }), {
                 auth: {
                     username: process.env.WARCRAFTLOGS_CLIENT_ID,
                     password: process.env.WARCRAFTLOGS_CLIENT_SECRET,
@@ -40,7 +42,6 @@ async function getAccessToken() {
 }
 
 async function getReportFights(reportCode) {
-    console.log(reportCode);
     const query = `
     {
         reportData {
@@ -59,9 +60,9 @@ async function getReportFights(reportCode) {
 
     try {
         const response = await axios.post(
-            'https://fresh.warcraftlogs.com/api/v2/client',
-            { query },
-            {
+            'https://fresh.warcraftlogs.com/api/v2/client', {
+                query
+            }, {
                 headers: {
                     Authorization: `Bearer ${accessToken}`,
                 },
@@ -81,80 +82,73 @@ async function getReportFights(reportCode) {
     }
 }
 
-async function getBuffsForFight(reportCode, fightId, startTime, endTime) {
+async function isWipe(reportCode, fightId)
+{
     const query = `
-    {
-        reportData {
+        {
+            reportData {
             report(code: "${reportCode}") {
-                events(startTime: ${startTime}, endTime: ${endTime}, fightIDs: [${fightId}], dataType: Buffs) {
+                events(
+                    killType: Wipes,
+                    fightIDs: [${fightId}]
+                ) {
                     data
                     nextPageTimestamp
                 }
+                }
             }
-        }
-    }`;
+        }`;
 
     try {
         const response = await axios.post(
-            'https://fresh.warcraftlogs.com/api/v2/client',
-            { query },
-            {
+            'https://fresh.warcraftlogs.com/api/v2/client', {
+                query
+            }, {
                 headers: {
                     Authorization: `Bearer ${accessToken}`,
                 },
             }
         );
 
-        console.log(JSON.stringify(response.data, null, 2));
-        // Parse the JSON response
-        const events = response.data.data.reportData.report.events;
-        console.log("Buff Events:", events);
+        if(!response.data.data.reportData.report.events.data || response.data.data.reportData.report.events.data.length == 0)
+            return false;
 
-        // Return the parsed events
-        return events;
+        return true;
     } catch (error) {
-        console.error('Error fetching buffs for fight:', error);
-        return [];
+        console.error('Error fetching wipe:', error);
+        return true;
     }
 }
 
-async function checkPlayerBuff(reportCode, fightId, playerId, buffId) {
+async function checkData(reportCode, fightId, sourceId = null, abilityId = null, dataType = "Buffs", hostilityType = null) {
     const query = `
     {
         reportData {
             report(code: "${reportCode}") {
-                table(fightIDs: [${fightId}], dataType: Buffs, abilityID: ${buffId}, sourceID: ${playerId})
+                table(fightIDs: [${fightId}], ${dataType ? "dataType: " + dataType + "," : ""} ${abilityId ? "abilityID: " + abilityId + "," : ""} ${sourceId ? "sourceID" + sourceId + "," : ""} ${hostilityType ? "hostilityType: " + hostilityType + "," : ""})
             }
         }
     }`;
 
     try {
         const response = await axios.post(
-            'https://fresh.warcraftlogs.com/api/v2/client',
-            { query },
-            {
+            'https://fresh.warcraftlogs.com/api/v2/client', {
+                query
+            }, {
                 headers: {
                     Authorization: `Bearer ${accessToken}`,
                 },
             }
         );
 
-        // console.log(JSON.stringify(response.data, null, 2));
-        // Parse the JSON response
-        const buffData = response.data.data.reportData.report.table.data;
-
-        if(!buffData.auras || buffData.auras.length == 0)
-            return false;
-
-        return true;
+        return response.data.data.reportData.report.table.data;
     } catch (error) {
         console.error('Error fetching buffs for fight:', error);
         return false;
     }
 }
 
-async function getSummary(reportCode)
-{
+async function getSummary(reportCode) {
     const query = `{
                     reportData {
                         report(code: "${reportCode}") {
@@ -165,9 +159,9 @@ async function getSummary(reportCode)
 
     try {
         const response = await axios.post(
-            'https://fresh.warcraftlogs.com/api/v2/client',
-            { query },
-            {
+            'https://fresh.warcraftlogs.com/api/v2/client', {
+                query
+            }, {
                 headers: {
                     Authorization: `Bearer ${accessToken}`,
                 },
@@ -185,13 +179,59 @@ async function getSummary(reportCode)
     }
 }
 
-async function processLogCheck(message, reportCode) {
+async function sendMessage(text, discordMessager) {
+    if (discordMessager)
+        discordMessager.channel.send(text);
+
+    console.log(text);
+}
+
+async function buffCheck(reportCode, buffId, buffName, fightId, players, discordMessager)
+{
+    const buffData = await checkData(reportCode, fightId, null, buffId, "Buffs");
+    const playersWithoutBuff = players.filter(function (player) {
+        return buffData.auras.filter((buffedPlayer) => buffedPlayer.id == player.id).length == 0;
+    });
+
+    playersWithoutBuff.forEach((player) => {
+        sendMessage("**" + player.name + "** did not have " + buffName + ".", discordMessager);
+    });
+}
+
+async function debuffUptimeCheck(reportCode, debuffId, debuffName, fightId, discordMessager) {
+    // Fetch the debuff data
+    const debuffData = await checkData(reportCode, fightId, null, debuffId, "Debuffs", "Enemies");
+
+    // Ensure there is at least one aura in the array
+    if (!debuffData.auras || debuffData.auras.length === 0) {
+        console.log(`No auras found for debuff ID ${debuffId}.`);
+        return;
+    }
+
+    // Access the first aura's totalUptime
+    const totalUptime = debuffData.auras[0].totalUptime || 0;
+    const totalTime = debuffData.totalTime || 0;
+
+    // Prevent division by zero
+    if (totalTime === 0) {
+        console.error("Error: totalTime is 0, cannot calculate uptime percentage.");
+        return;
+    }
+
+    // Calculate uptime percentage
+    const uptimePercentage = ((totalUptime / totalTime) * 100).toFixed(2);
+
+    // Send a message if uptime is below 90%
+    if (uptimePercentage < 80) {
+        sendMessage(`${debuffName} had uptime below 80%. **Total uptime:** ${uptimePercentage}%`, discordMessager);
+    }
+}
+
+async function processLogCheck(discordMessager, reportCode) {
     await getAccessToken();
 
-    if(message)
-    {
-        message.channel.send("# Analyzing Report " + reportCode);
-    }
+
+    sendMessage("# Encounters", discordMessager);
 
     const summary = await getSummary(reportCode);
     const playerDetails = Object.values(summary.data.playerDetails).flat();
@@ -202,18 +242,18 @@ async function processLogCheck(message, reportCode) {
     const fights = await getReportFights(reportCode);
 
     if (!fights) {
-        console.log("No fights found");
-        if (message)
-            message.channel.send("No fights found");
+        sendMessage("No fights found", discordMessager);
 
         return;
     }
 
     for (const fight of fights.filter((fight) => fight.encounterID > 0)) {
-        if(message)
-        {
-            message.channel.send("## " + fight.name);
-        }
+        const wipe = await isWipe(reportCode, fight.id);
+
+        sendMessage("## " + fight.name + " " + (wipe ? "(Wipe)" : ""), discordMessager);
+
+        await debuffUptimeCheck(reportCode,11597, "Sunder Armor", fight.id, discordMessager);
+        // await buffCheck(reportCode, 17628, "Flask of Supreme Power", fight.id, playerDetails.filter((player) => player.type == "Warlock" || player.type == "Mage" || player.icon == "Priest-Shadow"), discordMessager);
 
         switch (fight.encounterID) {
             // Molten Core Bosses
@@ -244,24 +284,22 @@ async function processLogCheck(message, reportCode) {
                 console.log("Processing Golemagg the Incinerator...");
                 break;
             case 150672: // Ragnaros
+            {
                 console.log("Processing Ragnaros...");
                 // const buffs = await getBuffsForFight(reportCode, fight.id, fight.startTime, fight.endTime);
                 // console.log(`Buffs for Ragnaros: ${JSON.stringify(buffs)}`);
-                for(const player of playerDetails)
-                {
-                    const greaterFireCheck = await checkPlayerBuff(reportCode, fight.id, player.id, 17543);
-                    if(!greaterFireCheck)
-                    {
-                        var msg = "**" +player.name + "** didn't had Greater Fire Protection Potion buff."
-                        console.log(msg);
-                        
-                        if(message)
-                            message.channel.send(msg);
-                    }
-                }
 
+                // const greaterFireCheck = await checkData(reportCode, fight.id, null, 17543, "Buffs");
+                // const playersWithoutBuff = playerDetails.filter(function (player) {
+                //     return greaterFireCheck.auras.filter((buffedPlayer) => buffedPlayer.id == player.id).length == 0;
+                // });
+
+                // playersWithoutBuff.forEach((player) => {
+                //     sendMessage("**" + player.name + "** did not have Greater Fire Protection Potion buff.", discordMessager);
+                // });
+                await buffCheck(reportCode, 17543, "Greater Fire Protection Potion", fight.id, playerDetails, discordMessager);
                 break;
-
+            }
             // Onyxia's Lair Boss
             case 150663: // Onyxia
                 console.log("Processing Onyxia...");
@@ -301,17 +339,17 @@ async function processLogCheck(message, reportCode) {
     // }
 }
 
-client.on('messageCreate', async (message) => {
-    if (message.content.startsWith('!checklog')) {
-        const args = message.content.split(' ');
+client.on('messageCreate', async (discordMessager) => {
+    if (discordMessager.content.startsWith('!checklog')) {
+        const args = discordMessager.content.split(' ');
         if (args.length < 2) {
-            message.reply('Please provide a log ID. Example: !checklog 7yWMKjFQXYncLzxd');
+            discordMessager.reply('Please provide a log ID. Example: !checklog 7yWMKjFQXYncLzxd');
             return;
         }
 
         const reportCode = args[1];
-        message.reply(`Checking log: ${reportCode}...`);
-        await processLogCheck(message, reportCode);
+        discordMessager.reply(`Checking log: ${reportCode}...`);
+        await processLogCheck(discordMessager, reportCode);
     }
 });
 
@@ -323,8 +361,8 @@ client.on('ready', async () => {
 
     // Call processLogCheck automatically when the bot starts
     const reportCode = "7yWMKjFQXYncLzxd";
-    //console.log(`Processing log: ${reportCode}...`);
-    //await processLogCheck(null, reportCode);
+    console.log(`Processing log: ${reportCode}...`);
+    await processLogCheck(null, reportCode);
 });
 
 
