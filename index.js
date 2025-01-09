@@ -369,11 +369,11 @@ async function processLogCheck(discordMessager, reportCode) {
 
         var fightInfo = "";
         fightInfo += await castCheck(reportCode, fight.id, 10060, "Power Infusion") + "\n";
-        fightInfo += "**DEBUFFS CHECK**\n\n";
-        fightInfo += await debuffUptimeCheck(reportCode, 12579, "Winter's Chill", fight.id);
-        fightInfo += await debuffUptimeCheck(reportCode, 11722, "Curse of Elements", fight.id);
-        fightInfo += await debuffUptimeCheck(reportCode, 11717, "Curse of Recklessness", fight.id);
-        fightInfo += await debuffUptimeCheck(reportCode, 17862, "Curse of Shadow", fight.id);
+        // fightInfo += "**DEBUFFS CHECK**\n\n";
+        // fightInfo += await debuffUptimeCheck(reportCode, 12579, "Winter's Chill", fight.id);
+        // fightInfo += await debuffUptimeCheck(reportCode, 11722, "Curse of Elements", fight.id);
+        // fightInfo += await debuffUptimeCheck(reportCode, 11717, "Curse of Recklessness", fight.id);
+        // fightInfo += await debuffUptimeCheck(reportCode, 17862, "Curse of Shadow", fight.id);
         fightInfo += "\n";
         fightInfo += await dispelCheck(reportCode, fight.id);
         // await buffCheck(reportCode, 17628, "Flask of Supreme Power", fight.id, playerDetails.filter((player) => player.type == "Warlock" || player.type == "Mage" || player.icon == "Priest-Shadow"), discordMessager);
